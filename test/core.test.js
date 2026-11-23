@@ -130,3 +130,93 @@ test('a second ring of cameras tightens the stool hull (the claim made on the pa
   const one = score(0.35), two = score([0.15, 0.62]);
   assert.ok(two > one + 0.1, `one ring ${one}, two rings ${two}`);
 });
+
+// ---- v1.1: smooth mesh, GLB, teapot ----
+import { buildMesh, meshVolume, isWatertight } from '../src/core/mesh.js';
+import { toGLB, toOBJMesh, toPLYTriMesh } from '../src/core/export.js';
+import { distance } from '../src/core/synth.js';
+import { colorizePoints } from '../src/core/carve.js';
+
+function demoHull(name, res = 64, n = 36) {
+  const cams = turntableCameras(n, { ...CAM, width: 128, height: 128 });
+  const imgs = cams.map((c, i) => renderView(name, c, { noise: 4, seed: i + 1 }));
+  const masks = imgs.map((im) => segment(im.data, im.width, im.height).mask);
+  return { cams, imgs, hull: carve(cams, masks, { res }) };
+}
+
+test('smooth mesh of every demo object is closed at 96 cubed, faces outward, and hugs the true surface', () => {
+  for (const name of objectNames) {
+    const { hull } = demoHull(name, 96);
+    const m = buildMesh(hull, 0);
+    assert.ok(isWatertight(m), name + ' mesh has open or non-manifold edges');
+    assert.ok(meshVolume(m) > 0, name + ' triangles wind inward');
+    let err = 0; const n = m.positions.length / 3;
+    for (let i = 0; i < n; i++) err += distance(name, m.positions[i * 3], m.positions[i * 3 + 1], m.positions[i * 3 + 2]);
+    assert.ok(err / n < 0.03, `${name} mean surface error ${(err / n).toFixed(4)}`);
+  }
+});
+
+test('mesh volume agrees with the voxel volume of the hull', () => {
+  const { hull } = demoHull('vase', 96);
+  const m = buildMesh(hull, 0);
+  const rel = Math.abs(meshVolume(m) - hull.volume(0)) / hull.volume(0);
+  assert.ok(rel < 0.03, 'relative volume difference ' + rel);
+});
+
+test('mesh normals are unit length and point away from the inside', () => {
+  const { hull } = demoHull('teapot', 64);
+  const m = buildMesh(hull, 0);
+  let outward = 0; const n = m.positions.length / 3;
+  for (let i = 0; i < n; i++) {
+    const nx = m.normals[i * 3], ny = m.normals[i * 3 + 1], nz = m.normals[i * 3 + 2];
+    assert.ok(Math.abs(Math.hypot(nx, ny, nz) - 1) < 1e-4);
+    const e = 0.04;
+    if (inside('teapot', m.positions[i * 3] + nx * e, m.positions[i * 3 + 1] + ny * e, m.positions[i * 3 + 2] + nz * e) === false) outward++;
+  }
+  assert.ok(outward / n > 0.97, 'outward fraction ' + outward / n);
+});
+
+test('the teapot, with a spout and a handle, carves to over 95% overlap', () => {
+  const { hull } = demoHull('teapot', 96);
+  const truth = new Uint8Array(96 ** 3);
+  for (let z = 0; z < 96; z++) for (let y = 0; y < 96; y++) for (let x = 0; x < 96; x++) truth[hull.index(x, y, z)] = inside('teapot', ...hull.center(x, y, z)) ? 1 : 0;
+  assert.ok(iou(hull.alive(0), truth) > 0.95);
+});
+
+test('vertex colours come from the photos: the vase is red-brown and navy, never grey', () => {
+  const { hull, cams, imgs } = demoHull('vase', 64);
+  const m = buildMesh(hull, 0);
+  const rgb = colorizePoints(m.positions, m.normals, cams, imgs, hull.size * 1.75);
+  let grey = 0; const n = m.positions.length / 3;
+  for (let i = 0; i < n; i++) if (rgb[i * 3] === 150 && rgb[i * 3 + 1] === 150 && rgb[i * 3 + 2] === 150) grey++;
+  assert.ok(grey / n < 0.02, 'uncoloured fraction ' + grey / n);
+});
+
+test('GLB is a valid binary glTF 2.0 container whose accessors fit the buffer', () => {
+  const { hull, cams, imgs } = demoHull('rook', 48, 24);
+  const m = buildMesh(hull, 0);
+  const rgb = colorizePoints(m.positions, m.normals, cams, imgs, hull.size * 1.75);
+  const buf = toGLB(m, rgb), dv = new DataView(buf);
+  assert.equal(dv.getUint32(0, true), 0x46546c67); assert.equal(dv.getUint32(4, true), 2); assert.equal(dv.getUint32(8, true), buf.byteLength);
+  const jl = dv.getUint32(12, true); assert.equal(dv.getUint32(16, true), 0x4e4f534a);
+  const json = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 20, jl)));
+  const binHead = 20 + jl; assert.equal(dv.getUint32(binHead + 4, true), 0x004e4942);
+  const binLen = dv.getUint32(binHead, true); assert.equal(binHead + 8 + binLen, buf.byteLength);
+  assert.equal(json.buffers[0].byteLength, binLen);
+  for (const bv of json.bufferViews) assert.ok(bv.byteOffset + bv.byteLength <= binLen);
+  assert.equal(json.accessors[0].count, m.positions.length / 3);
+  assert.equal(json.accessors[3].count, m.indices.length);
+  const idxOff = binHead + 8 + json.bufferViews[3].byteOffset;
+  for (let i = 0; i < 30; i++) assert.ok(dv.getUint32(idxOff + i * 4, true) < json.accessors[0].count);
+  assert.ok(json.accessors[0].min.every(Number.isFinite) && json.accessors[0].max.every(Number.isFinite));
+});
+
+test('OBJ and PLY mesh exporters write one record per vertex and face', () => {
+  const { hull } = demoHull('mug', 48, 24);
+  const m = buildMesh(hull, 0), rgb = new Uint8Array(m.positions.length).fill(200);
+  const obj = toOBJMesh(m, rgb).split('\n'), ply = toPLYTriMesh(m, rgb).split('\n');
+  assert.equal(obj.filter((l) => l.startsWith('v ')).length, m.positions.length / 3);
+  assert.equal(obj.filter((l) => l.startsWith('f ')).length, m.indices.length / 3);
+  assert.ok(ply.includes(`element face ${m.indices.length / 3}`));
+  assert.equal(ply.filter((l) => l.startsWith('3 ')).length, m.indices.length / 3);
+});

@@ -6,7 +6,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>Plinth | Carve a 3D shape out of photographs</title>
-<meta name="description" content="Plinth rebuilds the shape of an object from silhouettes. Drop in turntable photos or a video and watch the volume get carved, entirely in your browser.">
+<meta name="description" content="Plinth rebuilds the shape of an object from silhouettes. Drop in turntable photos or a video and watch the volume get carved into a smooth, coloured mesh, entirely in your browser.">
 <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -44,8 +44,12 @@
       <label class="scrub"><span class="lab">Views used</span>
         <input id="views" type="range" min="0" max="36" value="0" step="1" aria-label="Number of views used">
         <span id="viewsNum" class="num">0 / 36</span></label>
+      <div class="seg" role="group" aria-label="Form">
+        <button id="sSmooth" class="on" type="button" aria-pressed="true">Smooth</button>
+        <button id="sVoxels" type="button" aria-pressed="false">Voxels</button>
+      </div>
       <div class="seg" role="group" aria-label="Surface">
-        <button id="mColor" class="on" type="button">Photo colour</button>
+        <button id="mColor" class="on" type="button">Colour</button>
         <button id="mMatte" type="button">Matte</button>
       </div>
     </div>
@@ -62,7 +66,7 @@
       <h2>Carve</h2>
       <label class="row"><span>Photos taken</span><input id="count" type="range" min="6" max="72" step="2" value="36"><b id="countNum" class="num">36</b></label>
       <label class="row"><span>Grid</span>
-        <select id="res" aria-label="Voxel grid resolution"><option value="48">48 cubed</option><option value="64" selected>64 cubed</option><option value="96">96 cubed</option><option value="128">128 cubed</option></select></label>
+        <select id="res" aria-label="Voxel grid resolution"><option value="48">48 cubed</option><option value="64">64 cubed</option><option value="96" selected>96 cubed</option><option value="128">128 cubed</option></select></label>
       <label class="row"><span>Tolerance</span><input id="tol" type="range" min="0" max="3" step="1" value="0"><b id="tolNum" class="num">0</b></label>
       <p class="note">Tolerance lets a voxel miss that many silhouettes before it is cut. Raise it when masks are noisy.</p>
     </div>
@@ -72,6 +76,8 @@
         <div><dt>Volume</dt><dd id="sVol" class="num">0</dd></div>
         <div id="gtRow"><dt>Overlap with true shape</dt><dd id="sIou" class="num">0</dd></div>
         <div id="gtRow2"><dt>Mask accuracy</dt><dd id="sMask" class="num">0</dd></div>
+        <div id="gtRow3"><dt>Surface error</dt><dd id="sErr" class="num">0</dd></div>
+        <div><dt>Mesh</dt><dd id="sTris" class="num">0</dd></div>
         <div><dt>Surface voxels</dt><dd id="sSurf" class="num">0</dd></div>
       </dl>
       <p id="statsNote" class="note"></p>
@@ -79,9 +85,10 @@
     <div class="block">
       <h2>Take it with you</h2>
       <div class="exports">
-        <button class="btn" id="xPoints" type="button">PLY points</button>
-        <button class="btn" id="xMesh" type="button">PLY mesh</button>
+        <button class="btn" id="xGlb" type="button">GLB</button>
         <button class="btn" id="xObj" type="button">OBJ</button>
+        <button class="btn" id="xMesh" type="button">PLY mesh</button>
+        <button class="btn" id="xPoints" type="button">PLY points</button>
       </div>
     </div>
   </aside>
@@ -125,7 +132,7 @@
       <li><b>Cut out the object.</b> Each photo is compared with its own backdrop. What differs is the silhouette.</li>
       <li><b>Start with a block.</b> A cube of voxels is placed where the object stands.</li>
       <li><b>Cut with each view.</b> A voxel that lands outside a silhouette cannot be part of the object, so it goes. Every photo removes one more wedge.</li>
-      <li><b>Paint what is left.</b> Surface voxels take their colour from the photos that can see them.</li>
+      <li><b>Smooth and paint.</b> The blocky surface is turned into a smooth mesh, then every vertex takes its colour from the photos that can see it.</li>
     </ol>
     <figure class="slice">
       <canvas id="slice" width="560" height="560" aria-label="Top-down slice through the shape. Orange cells are removed by the current view."></canvas>
@@ -149,7 +156,7 @@
 </main>
 
 <footer class="foot">
-  <span>Plinth 1.0, MIT licence. Shapes are computed here, in your browser, and nothing is sent anywhere.</span>
+  <span>Plinth 1.1, MIT licence. Shapes are computed here, in your browser, and nothing is sent anywhere.</span>
   <a href="https://github.com/Aditya2375/plinth" rel="noopener">github.com/Aditya2375/plinth</a>
 </footer>
 <script type="module" src="src/app/main.js"></script>

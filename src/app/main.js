@@ -1,8 +1,9 @@
 import { turntableCameras } from '../core/camera.js';
 import { segment, maskIoU } from '../core/segment.js';
-import { Hull, surface, normals, colorize, iou } from '../core/carve.js';
-import { renderView, objectNames, objectInfo, inside } from '../core/synth.js';
-import { toPLYPoints, toPLYMesh, toOBJ } from '../core/export.js';
+import { Hull, surface, normals, colorize, colorizePoints, iou } from '../core/carve.js';
+import { buildMesh, isWatertight } from '../core/mesh.js';
+import { renderView, objectNames, objectInfo, inside, distance } from '../core/synth.js';
+import { toPLYPoints, toOBJMesh, toPLYTriMesh, toGLB } from '../core/export.js';
 import { Viewer } from './viewer.js';
 import { recordSlice, drawSlice } from './slice.js';
 import { framesFromImages, framesFromVideo } from './loaders.js';
@@ -12,7 +13,7 @@ const DEG = Math.PI / 180;
 const DEMO = { elevation: [0.15, 0.62], distance: 3.4, fov: 44 * DEG, size: 128 };
 
 const S = {
-  mode: 'demo', object: 'vase', count: 36, res: 64, tol: 0,
+  mode: 'demo', object: 'teapot', count: 36, res: 96, tol: 0, shape: 'smooth', mesh: null, meshK: -1, meshRgb: null,
   views: [], cams: [], k: 0, hull: null, surf: null, colors: null, nrm: null,
   matte: false, token: 0, playTimer: 0, rec: null, user: { frames: null, elev: 20, fov: 44, dist: 3.4, sens: 1 },
 };
@@ -82,7 +83,7 @@ function afterLoad() {
   $('views').max = String(S.views.length);
   buildSheet(); viewer.setCameraMarks(S.cams, 0);
   const demo = S.mode === 'demo';
-  $('gtRow').hidden = !demo; $('gtRow2').hidden = !demo;
+  $('gtRow').hidden = !demo; $('gtRow2').hidden = !demo; $('gtRow3').hidden = !demo;
   $('statsNote').textContent = demo ? 'Scored against the exact shape the photos were drawn from.' : 'No ground truth for your own photos. Check the orange outlines on the contact sheet instead.';
   $('subjectNote').textContent = demo ? objectInfo(S.object).note : 'Showing your own object.';
   document.querySelectorAll('.chip').forEach((c) => c.classList.toggle('on', demo && c.dataset.name === S.object));
@@ -100,11 +101,17 @@ function recomputeHull(k) {
 }
 function stepHull() { S.hull.addView(S.cams[S.k], S.views[S.k].mask, S.tol); S.k++; }
 
+function applyShape() {
+  const fresh = S.mesh && S.meshK === S.k && S.k > 0;
+  viewer.show(S.shape === 'smooth' && fresh ? 'smooth' : 'voxels');
+}
+
 function updateAll(delayColor) {
   const h = S.hull, total = h.res ** 3, left = h.count(S.tol);
   S.surf = surface(h, S.tol);
   viewer.setVoxels(h, S.surf, S.matte ? null : S.colors && S.colors.k === S.k ? S.colors.rgb : null);
   viewer.setCameraMarks(S.cams, S.k);
+  applyShape();
   $('rVox').textContent = fmt(left);
   const drop = S.k === 0 ? null : (1 - left / total) * 100;
   $('rDrop').textContent = drop === null ? 'solid block' : `${drop.toFixed(1)}% of the block cut away`;
@@ -117,7 +124,7 @@ function updateAll(delayColor) {
 let settleTimer = 0;
 function scheduleSettle() { clearTimeout(settleTimer); settleTimer = setTimeout(settle, 220); }
 function settle() {
-  if (S.k === 0) { $('sIou').textContent = '-'; $('sMask').textContent = '-'; return; }
+  if (S.k === 0) { $('sIou').textContent = '-'; $('sMask').textContent = '-'; $('sErr').textContent = '-'; $('sTris').textContent = '-'; return; }
   const my = S.token, h = S.hull;
   S.nrm = normals(h, S.surf, S.tol);
   const used = S.cams.slice(0, S.k), imgs = S.views.slice(0, S.k).map((v) => v.img);
@@ -125,12 +132,29 @@ function settle() {
   if (my !== S.token) return;
   S.colors = { k: S.k, rgb };
   if (!S.matte) viewer.setVoxels(h, S.surf, rgb);
+  buildSmooth();
   if (S.mode === 'demo') {
     const res = h.res, truth = new Uint8Array(res ** 3);
     for (let z = 0; z < res; z++) for (let y = 0; y < res; y++) for (let x = 0; x < res; x++) { const c = h.center(x, y, z); truth[h.index(x, y, z)] = inside(S.object, c[0], c[1], c[2]) ? 1 : 0; }
     $('sIou').textContent = (iou(h.alive(S.tol), truth) * 100).toFixed(1) + '%';
     let a = 0; for (let i = 0; i < S.k; i++) a += maskIoU(S.views[i].mask, S.views[i].truth);
     $('sMask').textContent = ((a / S.k) * 100).toFixed(1) + '%';
+  }
+}
+
+function buildSmooth() {
+  const h = S.hull, my = S.token;
+  const m = buildMesh(h, S.tol);
+  const rgb = colorizePoints(m.positions, m.normals, S.cams.slice(0, S.k), S.views.slice(0, S.k).map((v) => v.img), h.size * 1.75);
+  if (my !== S.token) return;
+  S.mesh = m; S.meshK = S.k; S.meshRgb = rgb;
+  viewer.setSmooth(m, S.matte ? null : rgb);
+  applyShape();
+  $('sTris').textContent = `${fmt(m.indices.length / 3)} tris, ${isWatertight(m) ? 'closed' : 'open edges'}`;
+  if (S.mode === 'demo') {
+    let e = 0; const n = m.positions.length / 3;
+    for (let i = 0; i < n; i++) e += distance(S.object, m.positions[i * 3], m.positions[i * 3 + 1], m.positions[i * 3 + 2]);
+    $('sErr').textContent = ((e / n) * 100).toFixed(2) + '% of radius';
   }
 }
 
@@ -193,6 +217,7 @@ function ensureColors() {
   const rgb = colorize(S.hull, S.surf, S.nrm, S.cams.slice(0, S.k), S.views.slice(0, S.k).map((v) => v.img));
   S.colors = { k: S.k, rgb }; return rgb;
 }
+function ensureMesh() { if (!S.mesh || S.meshK !== S.k) buildSmooth(); }
 const base = () => 'plinth-' + (S.mode === 'demo' ? S.object : 'scan');
 function exportable() { if (S.k < 3) { say('Use at least three views before exporting.'); return false; } return true; }
 
@@ -207,19 +232,18 @@ function init() {
   }
   $('play').addEventListener('click', play);
   $('views').addEventListener('input', (e) => { stopPlay(); viewer.controls.autoRotate = false; setK(Number(e.target.value), true); });
-  $('mColor').addEventListener('click', () => { S.matte = false; $('mColor').classList.add('on'); $('mMatte').classList.remove('on'); updateAll(1); });
-  $('mMatte').addEventListener('click', () => { S.matte = true; $('mMatte').classList.add('on'); $('mColor').classList.remove('on'); updateAll(); });
+  $('mColor').addEventListener('click', () => { S.matte = false; $('mColor').classList.add('on'); $('mMatte').classList.remove('on'); updateAll(1); if (S.mesh && S.meshK === S.k) viewer.setSmooth(S.mesh, S.meshRgb); applyShape(); });
+  $('mMatte').addEventListener('click', () => { S.matte = true; $('mMatte').classList.add('on'); $('mColor').classList.remove('on'); updateAll(); if (S.mesh && S.meshK === S.k) viewer.setSmooth(S.mesh, null); applyShape(); });
+  const setShape = (sh) => { S.shape = sh; $('sSmooth').classList.toggle('on', sh === 'smooth'); $('sVoxels').classList.toggle('on', sh === 'voxels'); $('sSmooth').setAttribute('aria-pressed', sh === 'smooth'); $('sVoxels').setAttribute('aria-pressed', sh === 'voxels'); applyShape(); };
+  $('sSmooth').addEventListener('click', () => setShape('smooth')); $('sVoxels').addEventListener('click', () => setShape('voxels'));
   $('count').addEventListener('input', (e) => { $('countNum').textContent = e.target.value; });
   $('count').addEventListener('change', (e) => { S.count = Number(e.target.value); loadDemo(); });
   $('res').addEventListener('change', (e) => { S.res = Number(e.target.value); S.rec = null; const k = S.views.length; stopPlay(); recomputeHull(k); updateAll(1); if (sliceSeen) { ensureSlice(); showSlice(S.views.length); } });
   $('tol').addEventListener('input', (e) => { $('tolNum').textContent = e.target.value; S.tol = Number(e.target.value); S.rec = null; const k = S.k; stopPlay(); recomputeHull(k); updateAll(1); if (sliceSeen) { ensureSlice(); showSlice(S.views.length); } });
   $('xPoints').addEventListener('click', () => { if (!exportable()) return; const rgb = ensureColors(); save(base() + '-points.ply', toPLYPoints(S.hull, S.surf, rgb)); });
-  $('xMesh').addEventListener('click', () => {
-    if (!exportable()) return; const rgb = ensureColors(); const idx = new Map();
-    for (let i = 0; i < S.surf.length / 3; i++) idx.set(S.hull.index(S.surf[i * 3], S.surf[i * 3 + 1], S.surf[i * 3 + 2]), i);
-    save(base() + '-mesh.ply', toPLYMesh(S.hull, S.tol, (x, y, z) => { const i = idx.get(S.hull.index(x, y, z)); return i === undefined ? null : [rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2]]; }));
-  });
-  $('xObj').addEventListener('click', () => { if (!exportable()) return; save(base() + '.obj', toOBJ(S.hull, S.tol)); });
+  $('xMesh').addEventListener('click', () => { if (!exportable()) return; ensureMesh(); save(base() + '-mesh.ply', toPLYTriMesh(S.mesh, S.meshRgb)); });
+  $('xObj').addEventListener('click', () => { if (!exportable()) return; ensureMesh(); save(base() + '.obj', toOBJMesh(S.mesh, S.meshRgb)); });
+  $('xGlb').addEventListener('click', () => { if (!exportable()) return; ensureMesh(); save(base() + '.glb', toGLB(S.mesh, S.meshRgb), 'model/gltf-binary'); });
 
   const drop = $('drop'), file = $('file');
   drop.addEventListener('click', (e) => { if (e.target !== file) file.click(); });
@@ -241,4 +265,4 @@ function init() {
 }
 init();
 // Test hook: lets the browser check read state without exposing mutators.
-window.__plinth = { get state() { return { mode: S.mode, k: S.k, views: S.views.length, voxels: S.hull ? S.hull.count(S.tol) : 0 }; } };
+window.__plinth = { get state() { return { mode: S.mode, k: S.k, views: S.views.length, voxels: S.hull ? S.hull.count(S.tol) : 0, meshFresh: !!S.mesh && S.meshK === S.k, tris: S.mesh ? S.mesh.indices.length / 3 : 0, shape: S.shape }; } };

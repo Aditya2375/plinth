@@ -15,8 +15,9 @@ const st = () => p.evaluate(() => window.__plinth.state);
 const until = (fn, ms = 60000) => p.waitForFunction(fn, null, { timeout: ms });
 
 await p.goto(base);
-await until(() => window.__plinth.state.views === 36 && window.__plinth.state.k === 36);
-ok('demo loads and finishes the carve animation');
+await until(() => window.__plinth.state.views === 36 && window.__plinth.state.k === 36 && window.__plinth.state.meshFresh);
+ok('demo loads, finishes the carve animation and builds the smooth mesh');
+assert.ok((await st()).tris > 10000);
 assert.equal(await p.locator('#rVox').textContent() !== '0', true);
 
 if (!process.env.QUICK) {
@@ -46,7 +47,12 @@ assert.ok(txt.startsWith('ply\nformat ascii 1.0')); assert.ok(dl.suggestedFilena
 const declared = Number(/element vertex (\d+)/.exec(txt)[1]); assert.equal(txt.trim().split('\n').length, declared + txt.split('\n').indexOf('end_header') + 1);
 ok(`PLY points export is well formed (${declared} points)`);
 const [dl2] = await Promise.all([p.waitForEvent('download'), p.click('#xObj')]);
-const obj = readFileSync(await dl2.path(), 'utf8'); assert.ok(/^v /m.test(obj) && /^f \d+ \d+ \d+ \d+$/m.test(obj)); ok('OBJ export has vertices and quads');
+const obj = readFileSync(await dl2.path(), 'utf8'); assert.ok(/^v /m.test(obj) && /^f \d+\/\/\d+ \d+\/\/\d+ \d+\/\/\d+$/m.test(obj)); ok('OBJ export is a triangle mesh with normals');
+const [dl3] = await Promise.all([p.waitForEvent('download'), p.click('#xGlb')]);
+const glb = readFileSync(await dl3.path()); assert.equal(glb.readUInt32LE(0), 0x46546c67); assert.equal(glb.readUInt32LE(8), glb.length); assert.ok(dl3.suggestedFilename().endsWith('.glb')); ok(`GLB export is a binary glTF (${glb.length} bytes)`);
+await p.click('#sVoxels'); assert.equal((await st()).shape, 'voxels');
+assert.equal(await p.evaluate(() => document.getElementById('sVoxels').getAttribute('aria-pressed')), 'true'); await p.click('#sSmooth'); ok('smooth / voxel toggle works');
+const err = await p.locator('#sErr').textContent(); assert.ok(parseFloat(err) < 3, 'surface error ' + err); assert.match(await p.locator('#sTris').textContent(), /closed/); ok(`stool mesh is closed, surface error ${err}`);
 
 }
 // own photos

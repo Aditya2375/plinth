@@ -103,16 +103,22 @@ export function normals(hull, surf, tolerance = 0, radius = 2) {
 // decides which voxels each camera can actually see.
 // images: array of { data: Uint8ClampedArray RGBA, width, height }
 export function colorize(hull, surf, nrm, cameras, images) {
-  const n = surf.length / 3;
+  const n = surf.length / 3, pts = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) { const c = hull.center(surf[i * 3], surf[i * 3 + 1], surf[i * 3 + 2]); pts[i * 3] = c[0]; pts[i * 3 + 1] = c[1]; pts[i * 3 + 2] = c[2]; }
+  return colorizePoints(pts, nrm, cameras, images, hull.size * 1.75);
+}
+
+// Same, for arbitrary surface points (mesh vertices). `slack` is the depth
+// tolerance of the visibility test, in object units.
+export function colorizePoints(pts, nrm, cameras, images, slack) {
+  const n = pts.length / 3;
   const acc = new Float32Array(n * 3), wsum = new Float32Array(n);
-  const slack = hull.size * 1.75;
   for (let v = 0; v < cameras.length; v++) {
     const cam = cameras[v], img = images[v];
     const zbuf = new Float32Array(cam.width * cam.height).fill(Infinity);
     const proj = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
-      const c = hull.center(surf[i * 3], surf[i * 3 + 1], surf[i * 3 + 2]);
-      const [u, w, z] = project(cam, c[0], c[1], c[2]);
+      const [u, w, z] = project(cam, pts[i * 3], pts[i * 3 + 1], pts[i * 3 + 2]);
       proj[i * 3] = u; proj[i * 3 + 1] = w; proj[i * 3 + 2] = z;
       const px = Math.floor(u), py = Math.floor(w);
       if (px >= 0 && py >= 0 && px < cam.width && py < cam.height) { const q = py * cam.width + px; if (z < zbuf[q]) zbuf[q] = z; }
@@ -121,15 +127,14 @@ export function colorize(hull, surf, nrm, cameras, images) {
       const u = proj[i * 3], w = proj[i * 3 + 1], z = proj[i * 3 + 2];
       const px = Math.floor(u), py = Math.floor(w);
       if (px < 0 || py < 0 || px >= cam.width || py >= cam.height) continue;
-      // The neighbourhood minimum keeps thin gaps in the z-buffer from hiding visible voxels.
+      // The neighbourhood minimum keeps thin gaps in the z-buffer from hiding visible points.
       let zmin = Infinity;
       for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
         const qx = px + dx, qy = py + dy;
         if (qx >= 0 && qy >= 0 && qx < cam.width && qy < cam.height) zmin = Math.min(zmin, zbuf[qy * cam.width + qx]);
       }
       if (z > zmin + slack) continue;
-      const c = hull.center(surf[i * 3], surf[i * 3 + 1], surf[i * 3 + 2]);
-      const tx = cam.pos[0] - c[0], ty = cam.pos[1] - c[1], tz = cam.pos[2] - c[2];
+      const tx = cam.pos[0] - pts[i * 3], ty = cam.pos[1] - pts[i * 3 + 1], tz = cam.pos[2] - pts[i * 3 + 2];
       const tl = Math.hypot(tx, ty, tz);
       const facing = (nrm[i * 3] * tx + nrm[i * 3 + 1] * ty + nrm[i * 3 + 2] * tz) / tl;
       if (facing <= 0.1) continue;

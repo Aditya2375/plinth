@@ -24,7 +24,7 @@ export class Viewer {
     this.buildFloor();
     this.camMarks = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xff5a1f }));
     this.scene.add(this.camMarks);
-    this.mesh = null; this.cap = 0; this.dummy = new THREE.Object3D();
+    this.smooth = null; this.mesh = null; this.cap = 0; this.dummy = new THREE.Object3D();
     this.resize();
     new ResizeObserver(() => this.resize()).observe(canvas.parentElement);
     this.loop = this.loop.bind(this); requestAnimationFrame(this.loop);
@@ -73,6 +73,30 @@ export class Viewer {
     }
     this.mesh.count = n;
     this.mesh.instanceMatrix.needsUpdate = true; this.mesh.instanceColor.needsUpdate = true;
+  }
+  // m = { positions, indices, normals }, colors = Uint8Array rgb per vertex or null (matte)
+  setSmooth(m, colors) {
+    if (this.smooth) { this.scene.remove(this.smooth); this.smooth.geometry.dispose(); this.smooth.material.dispose(); this.smooth = null; }
+    if (!m) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(m.positions, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(m.normals, 3));
+    const c = new Float32Array(m.positions.length), col = new THREE.Color();
+    for (let i = 0; i < c.length; i += 3) {
+      if (colors) col.setRGB(colors[i] / 255, colors[i + 1] / 255, colors[i + 2] / 255, THREE.SRGBColorSpace); else col.setRGB(0.62, 0.6, 0.57, THREE.SRGBColorSpace);
+      c[i] = col.r; c[i + 1] = col.g; c[i + 2] = col.b;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(c, 3));
+    g.setIndex(new THREE.BufferAttribute(m.indices, 1));
+    this.smooth = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, metalness: 0 }));
+    this.smooth.frustumCulled = false;
+    this.scene.add(this.smooth);
+  }
+  // which = 'smooth' | 'voxels'
+  show(which) {
+    const smooth = which === 'smooth' && !!this.smooth;
+    if (this.smooth) this.smooth.visible = smooth;
+    if (this.mesh) this.mesh.visible = !smooth;
   }
   setCameraMarks(cams, used) {
     const p = [];

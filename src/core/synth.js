@@ -62,6 +62,23 @@ const OBJECTS = {
     },
     color(x, y) { return y > 0.4 ? rgb(176, 120, 72) : y > -0.45 && y < -0.3 ? rgb(60, 48, 40) : rgb(122, 80, 48); },
   },
+  teapot: {
+    label: 'Teapot',
+    note: 'No rotational symmetry: a spout, a handle and a loop of empty space.',
+    sdf(x, y, z) {
+      const body = (Math.hypot(x / 0.72, (y + 0.1) / 0.56, z / 0.72) - 1) * 0.5;
+      const lid = Math.max(len2(x, z) - 0.34, Math.abs(y - 0.5) - 0.045);
+      const knob = Math.hypot(len2(x, z), y - 0.62) - 0.1;
+      const spout = capsule(x, y, z, 0.55, -0.15, 0, 0.92, 0.3, 0, 0.1) - 0.0;
+      const handle = Math.hypot(len2(x + 0.74, y + 0.08) - 0.34, z) - 0.07;
+      return Math.min(body, lid, knob, spout, handle) * 0.8;
+    },
+    color(x, y, z) {
+      if (y > 0.43) return rgb(196, 62, 48);
+      if (Math.abs(y + 0.12) < 0.04 && x < 0.55 && x > -0.7) return rgb(240, 232, 214);
+      return rgb(44, 84, 140);
+    },
+  },
   rook: {
     label: 'Rook',
     note: 'Notched battlements and a stepped base.',
@@ -130,3 +147,7 @@ export function renderView(name, cam, { noise = 3, seed = 7 } = {}) {
   }
   return { data, width: W, height: H, truth };
 }
+
+// Distance from a point to the true surface of a demo object, in object units.
+// (The sdfs carry a 0.8 safety factor for the sphere tracer; undo it here.)
+export const distance = (name, x, y, z) => Math.abs(OBJECTS[name].sdf(x, y, z)) / 0.8;
