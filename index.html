@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; media-src blob:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Plinth | Carve a 3D shape out of photographs</title>
+<meta name="description" content="Plinth rebuilds the shape of an object from silhouettes. Drop in turntable photos or a video and watch the volume get carved, entirely in your browser.">
+<link rel="icon" href="assets/mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="bar">
+  <a class="brand" href="#top" aria-label="Plinth home">
+    <svg class="mark" viewBox="0 0 28 28" width="26" height="26" aria-hidden="true"><rect x="3" y="20" width="22" height="5" fill="currentColor"/><rect x="7" y="13" width="14" height="5" fill="currentColor"/><rect x="11" y="6" width="6" height="5" fill="#ff5a1f"/></svg>
+    <span class="word">Plinth</span>
+  </a>
+  <p class="tag">visual hull from silhouettes</p>
+  <nav>
+    <a href="#method">How it carves</a>
+    <a href="#limits">Limits</a>
+    <a href="#own" data-open-own>Your photos</a>
+    <a class="ext" href="https://github.com/Aditya2375/plinth" rel="noopener">Source</a>
+  </nav>
+</header>
+
+<main id="top">
+<div class="stage">
+  <aside class="sheet" aria-label="Photographs">
+    <div class="cap"><span>Contact sheet</span><span id="sheetCount" class="num">0 / 0</span></div>
+    <div id="thumbs" class="thumbs"></div>
+  </aside>
+
+  <section class="viewer" aria-label="3D result">
+    <canvas id="gl" aria-label="Interactive 3D view of the carved shape. Drag to orbit, scroll to zoom."></canvas>
+    <div class="readout">
+      <div class="r1"><span class="lab">Voxels left</span><span id="rVox" class="big num">0</span></div>
+      <div class="r2"><span id="rDrop" class="num">solid block</span></div>
+    </div>
+    <div class="busy" id="busy" hidden><span id="busyText">Photographing</span><i></i></div>
+    <div class="dock">
+      <button id="play" class="btn" type="button" aria-label="Replay the carve">Replay</button>
+      <label class="scrub"><span class="lab">Views used</span>
+        <input id="views" type="range" min="0" max="36" value="0" step="1" aria-label="Number of views used">
+        <span id="viewsNum" class="num">0 / 36</span></label>
+      <div class="seg" role="group" aria-label="Surface">
+        <button id="mColor" class="on" type="button">Photo colour</button>
+        <button id="mMatte" type="button">Matte</button>
+      </div>
+    </div>
+    <p id="status" class="status" role="status"></p>
+  </section>
+
+  <aside class="panel" aria-label="Controls">
+    <div class="block">
+      <h2>Subject</h2>
+      <div id="subjects" class="chips" role="group" aria-label="Demo subject"></div>
+      <p id="subjectNote" class="note"></p>
+    </div>
+    <div class="block">
+      <h2>Carve</h2>
+      <label class="row"><span>Photos taken</span><input id="count" type="range" min="6" max="72" step="2" value="36"><b id="countNum" class="num">36</b></label>
+      <label class="row"><span>Grid</span>
+        <select id="res" aria-label="Voxel grid resolution"><option value="48">48 cubed</option><option value="64" selected>64 cubed</option><option value="96">96 cubed</option><option value="128">128 cubed</option></select></label>
+      <label class="row"><span>Tolerance</span><input id="tol" type="range" min="0" max="3" step="1" value="0"><b id="tolNum" class="num">0</b></label>
+      <p class="note">Tolerance lets a voxel miss that many silhouettes before it is cut. Raise it when masks are noisy.</p>
+    </div>
+    <div class="block">
+      <h2>Measured</h2>
+      <dl class="stats">
+        <div><dt>Volume</dt><dd id="sVol" class="num">0</dd></div>
+        <div id="gtRow"><dt>Overlap with true shape</dt><dd id="sIou" class="num">0</dd></div>
+        <div id="gtRow2"><dt>Mask accuracy</dt><dd id="sMask" class="num">0</dd></div>
+        <div><dt>Surface voxels</dt><dd id="sSurf" class="num">0</dd></div>
+      </dl>
+      <p id="statsNote" class="note"></p>
+    </div>
+    <div class="block">
+      <h2>Take it with you</h2>
+      <div class="exports">
+        <button class="btn" id="xPoints" type="button">PLY points</button>
+        <button class="btn" id="xMesh" type="button">PLY mesh</button>
+        <button class="btn" id="xObj" type="button">OBJ</button>
+      </div>
+    </div>
+  </aside>
+</div>
+
+<section class="band own" id="own">
+  <div class="own-copy">
+    <p class="kicker">Your object</p>
+    <h2>Put something on a turntable and film it.</h2>
+    <p>Use a plain backdrop, a lamp that does not move, and one slow full turn. Drop the video here, or six or more photos taken at even steps around the object. Nothing is uploaded; the files never leave this tab.</p>
+    <ul class="tips">
+      <li>Camera fixed, object centred, backdrop one colour.</li>
+      <li>Photos are read in filename order and assumed evenly spaced over 360 degrees.</li>
+      <li>Shiny, see-through or backdrop-coloured objects will not carve well.</li>
+    </ul>
+  </div>
+  <div class="own-tool">
+    <label id="drop" class="drop" tabindex="0">
+      <input id="file" type="file" accept="image/*,video/*" multiple hidden>
+      <span class="d1">Drop photos or a video</span>
+      <span class="d2">or click to choose. Up to 120 photos, 200 MB for a video.</span>
+    </label>
+    <div class="fields">
+      <label><span>Camera height</span><input id="fElev" type="range" min="0" max="60" value="20"><b id="fElevN" class="num">20&deg;</b></label>
+      <label><span>Lens width</span><input id="fFov" type="range" min="20" max="80" value="44"><b id="fFovN" class="num">44&deg;</b></label>
+      <label><span>Distance</span><input id="fDist" type="range" min="20" max="60" value="34"><b id="fDistN" class="num">3.4</b></label>
+      <label><span>Mask sensitivity</span><input id="fSens" type="range" min="40" max="220" value="100"><b id="fSensN" class="num">1.0</b></label>
+    </div>
+    <p id="ownMsg" class="note" role="status"></p>
+    <button id="backDemo" class="btn" type="button" hidden>Back to the demo objects</button>
+  </div>
+</section>
+
+<section class="band method" id="method">
+  <div class="m-head">
+    <p class="kicker">How it carves</p>
+    <h2>Every photo is a cookie cutter.</h2>
+  </div>
+  <div class="m-grid">
+    <ol class="steps">
+      <li><b>Cut out the object.</b> Each photo is compared with its own backdrop. What differs is the silhouette.</li>
+      <li><b>Start with a block.</b> A cube of voxels is placed where the object stands.</li>
+      <li><b>Cut with each view.</b> A voxel that lands outside a silhouette cannot be part of the object, so it goes. Every photo removes one more wedge.</li>
+      <li><b>Paint what is left.</b> Surface voxels take their colour from the photos that can see them.</li>
+    </ol>
+    <figure class="slice">
+      <canvas id="slice" width="560" height="560" aria-label="Top-down slice through the shape. Orange cells are removed by the current view."></canvas>
+      <figcaption>
+        <div class="sl-top"><span class="lab">Top-down slice, mid height</span><span id="sliceCap" class="num"></span></div>
+        <label class="sl-scrub"><button id="slicePlay" class="btn small" type="button">Replay</button><input id="sliceK" type="range" min="0" max="36" value="0" aria-label="Views shown in the slice"></label>
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="band limits" id="limits">
+  <p class="kicker">Limits, measured</p>
+  <h2>What a silhouette cannot see.</h2>
+  <div class="l-grid">
+    <p>A hull is the biggest shape that fits inside every silhouette. It can never be smaller than the object, and it is bigger wherever the object is hollow or dented. The mug is the clearest case: its inside is invisible from outside, so the hull fills it and the overlap figure stays around 40%.</p>
+    <p>Two heights of camera tighten the hull a lot. The demo alternates between a low and a high ring. With one ring only, the stool scores 59% overlap with its true shape instead of 83%, because the space under the seat stays ambiguous.</p>
+    <p>Real photos are harder than the demo. Shadows get read as object, and a backdrop-coloured object gets cut out. Mask accuracy on the demo is measured against exact silhouettes, so treat it as an upper bound.</p>
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <span>Plinth 1.0, MIT licence. Shapes are computed here, in your browser, and nothing is sent anywhere.</span>
+  <a href="https://github.com/Aditya2375/plinth" rel="noopener">github.com/Aditya2375/plinth</a>
+</footer>
+<script type="module" src="src/app/main.js"></script>
+</body>
+</html>

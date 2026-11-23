@@ -1,0 +1,20 @@
+{
+  "name": "plinth",
+  "version": "1.0.0",
+  "description": "Carve a 3D shape out of silhouettes, in the browser.",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "author": "Aditya Kulkarni",
+  "license": "MIT",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "playwright-core": "^1.65.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aditya2375/plinth.git"
+  },
+  "homepage": "https://aditya2375.github.io/plinth/"
+}
