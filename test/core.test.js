@@ -220,3 +220,47 @@ test('OBJ and PLY mesh exporters write one record per vertex and face', () => {
   assert.ok(ply.includes(`element face ${m.indices.length / 3}`));
   assert.equal(ply.filter((l) => l.startsWith('3 ')).length, m.indices.length / 3);
 });
+
+// ---- v1.2: gaussian splats ----
+import { buildSplats, samplesOnMesh, quatFromZ, covariance, toSplat, toGaussianPLY } from '../src/core/splat.js';
+
+test('splats sit on the true surface, are unit-rotated, flat, and coloured like the object', () => {
+  const { hull, cams, imgs } = demoHull('teapot', 64, 36);
+  const m = buildMesh(hull, 0);
+  const s = buildSplats(m, cams, imgs.map((im) => ({ data: im.data, width: im.width, height: im.height })), { count: 8000 });
+  assert.equal(s.n, 8000);
+  let err = 0, flat = 0, bad = 0;
+  for (let i = 0; i < s.n; i++) {
+    err += distance('teapot', s.pos[i * 3], s.pos[i * 3 + 1], s.pos[i * 3 + 2]);
+    const q = Math.hypot(s.quat[i * 4], s.quat[i * 4 + 1], s.quat[i * 4 + 2], s.quat[i * 4 + 3]);
+    if (Math.abs(q - 1) > 1e-4) bad++;
+    if (s.scale[i * 3 + 2] < s.scale[i * 3]) flat++;
+  }
+  assert.equal(bad, 0); assert.equal(flat, s.n);
+  assert.ok(err / s.n < 0.03, 'mean distance ' + err / s.n);
+  let grey = 0; for (let i = 0; i < s.n; i++) if (s.rgb[i * 3] === 150 && s.rgb[i * 3 + 1] === 150 && s.rgb[i * 3 + 2] === 150) grey++;
+  assert.ok(grey / s.n < 0.1, 'too many uncoloured splats: ' + grey);
+});
+test('quatFromZ rotates +Z onto the normal', () => {
+  for (const n of [[0, 0, 1], [1, 0, 0], [0, 1, 0], [0.6, 0, 0.8], [0, 0, -1], [-0.3, -0.5, Math.sqrt(1 - 0.34)]]) {
+    const [x, y, z, w] = quatFromZ(...n);
+    const rx = 2 * (x * z + w * y), ry = 2 * (y * z - w * x), rz = 1 - 2 * (x * x + y * y);
+    assert.ok(Math.hypot(rx - n[0], ry - n[1], rz - n[2]) < 1e-9, JSON.stringify(n));
+  }
+});
+test('covariance is symmetric positive: thin along the normal', () => {
+  const q = quatFromZ(0, 1, 0), s = { quat: new Float32Array(q), scale: new Float32Array([0.1, 0.1, 0.02]) };
+  const c = covariance(s, 0);
+  assert.ok(Math.abs(c[3] - 0.0004) < 1e-7 && Math.abs(c[0] - 0.01) < 1e-7 && Math.abs(c[5] - 0.01) < 1e-7);
+});
+test('.splat and 3DGS PLY exports have the exact sizes and layout', () => {
+  const s = { n: 3, pos: new Float32Array([0, 1, 2, 3, 4, 5, 6, 7, 8]), scale: new Float32Array(9).fill(0.05), quat: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1]), rgb: new Uint8Array([255, 0, 0, 0, 255, 0, 0, 0, 255]) };
+  const b = toSplat(s); assert.equal(b.length, 96);
+  const dv = new DataView(b.buffer);
+  assert.equal(dv.getFloat32(32 + 4, true), 4); assert.equal(b[24], 255); assert.equal(b[32 + 25], 255); assert.equal(b[28], 255); assert.equal(b[29], 128);
+  const p = toGaussianPLY(s), text = new TextDecoder().decode(p.slice(0, 900));
+  assert.ok(text.startsWith('ply\nformat binary_little_endian 1.0\nelement vertex 3\n'));
+  const hl = text.indexOf('end_header\n') + 11;
+  assert.equal(p.length - hl, 3 * 17 * 4);
+  assert.equal(new DataView(p.buffer, p.byteOffset + hl).getFloat32(4 * 2, true), 2);
+});

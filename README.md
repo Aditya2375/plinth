@@ -11,10 +11,14 @@ Live: https://aditya2375.github.io/plinth/
 - Voxels that fall outside any silhouette are removed, view by view. You can scrub the carve and watch a top-down slice lose a wedge per photo.
 - The blocky surface becomes a smooth closed mesh (blurred occupancy field plus surface nets). Each vertex is coloured from the photos that can see it, using a per-view depth buffer.
 - Scored against ground truth on the demos: overlap with the true shape, and mean distance of the mesh to the true surface.
+- Gaussian splats: 60,000 flat gaussians placed on the recovered surface, coloured per photo pixel, drawn in the browser with a depth-sorted splat renderer. Export `.splat` or the standard 3D Gaussian Splatting PLY and open them in any splat viewer.
 - Export GLB, OBJ or PLY (all with vertex colours), or PLY points.
 - Bring your own object: drop six or more turntable photos, or one video of a full turn.
 
 ## What it cannot do
+
+The splats are placed on a recovered surface and coloured from the photos. They are not optimised against the photos the way full 3D Gaussian Splatting training does, so fine texture, view-dependent shine and fuzzy detail are not captured. Plinth does not estimate camera poses, so it needs a fixed camera and a turntable.
+
 
 A visual hull is never smaller than the object. Hollows and dents are invisible to silhouettes, so the demo mug comes out filled in: its overlap with the true shape stays near 40%. Shiny, transparent or backdrop-coloured objects will not cut out cleanly, and shadows are read as object. Photos must be evenly spaced over 360 degrees with a fixed camera; Plinth does not estimate camera poses.
 
@@ -29,7 +33,7 @@ No build step.
 
 ## Test it
 
-    npm test                                    # 20 core tests, no browser, no install needed
+    npm test                                    # core tests, no browser, no install needed
     npm install && tools/make-fixtures.sh /tmp/fx
     node test/ui.mjs http://localhost:8000/ /tmp/fx   # browser checks, needs Chrome and ffmpeg
 

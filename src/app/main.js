@@ -5,6 +5,7 @@ import { buildMesh, isWatertight } from '../core/mesh.js';
 import { renderView, objectNames, objectInfo, inside, distance } from '../core/synth.js';
 import { toPLYPoints, toOBJMesh, toPLYTriMesh, toGLB } from '../core/export.js';
 import { Viewer } from './viewer.js';
+import { buildSplats, toSplat, toGaussianPLY } from '../core/splat.js';
 import { recordSlice, drawSlice } from './slice.js';
 import { framesFromImages, framesFromVideo } from './loaders.js';
 
@@ -13,11 +14,12 @@ const DEG = Math.PI / 180;
 const DEMO = { elevation: [0.15, 0.62], distance: 3.4, fov: 44 * DEG, size: 128 };
 
 const S = {
-  mode: 'demo', object: 'teapot', count: 36, res: 96, tol: 0, shape: 'smooth', mesh: null, meshK: -1, meshRgb: null,
+  mode: 'demo', object: 'teapot', count: 36, res: 96, tol: 0, shape: 'splats', splats: null, mesh: null, meshK: -1, meshRgb: null,
   views: [], cams: [], k: 0, hull: null, surf: null, colors: null, nrm: null,
   matte: false, token: 0, playTimer: 0, rec: null, user: { frames: null, elev: 20, fov: 44, dist: 3.4, sens: 1 },
 };
 let viewer;
+const SPLATS = 60000;
 const fmt = (n) => n.toLocaleString('en-US');
 const busy = (on, text) => { $('busy').hidden = !on; if (text) $('busyText').textContent = text; };
 const tick = () => new Promise((r) => setTimeout(r));
@@ -103,7 +105,7 @@ function stepHull() { S.hull.addView(S.cams[S.k], S.views[S.k].mask, S.tol); S.k
 
 function applyShape() {
   const fresh = S.mesh && S.meshK === S.k && S.k > 0;
-  viewer.show(S.shape === 'smooth' && fresh ? 'smooth' : 'voxels');
+  viewer.show(fresh ? S.shape : 'voxels');
 }
 
 function updateAll(delayColor) {
@@ -149,6 +151,8 @@ function buildSmooth() {
   if (my !== S.token) return;
   S.mesh = m; S.meshK = S.k; S.meshRgb = rgb;
   viewer.setSmooth(m, S.matte ? null : rgb);
+  S.splats = buildSplats(m, S.cams.slice(0, S.k), S.views.slice(0, S.k).map((v) => v.img), { count: SPLATS, slack: h.size * 1.75 });
+  viewer.setSplats(S.splats, S.matte);
   applyShape();
   $('sTris').textContent = `${fmt(m.indices.length / 3)} tris, ${isWatertight(m) ? 'closed' : 'open edges'}`;
   if (S.mode === 'demo') {
@@ -232,10 +236,10 @@ function init() {
   }
   $('play').addEventListener('click', play);
   $('views').addEventListener('input', (e) => { stopPlay(); viewer.controls.autoRotate = false; setK(Number(e.target.value), true); });
-  $('mColor').addEventListener('click', () => { S.matte = false; $('mColor').classList.add('on'); $('mMatte').classList.remove('on'); updateAll(1); if (S.mesh && S.meshK === S.k) viewer.setSmooth(S.mesh, S.meshRgb); applyShape(); });
-  $('mMatte').addEventListener('click', () => { S.matte = true; $('mMatte').classList.add('on'); $('mColor').classList.remove('on'); updateAll(); if (S.mesh && S.meshK === S.k) viewer.setSmooth(S.mesh, null); applyShape(); });
-  const setShape = (sh) => { S.shape = sh; $('sSmooth').classList.toggle('on', sh === 'smooth'); $('sVoxels').classList.toggle('on', sh === 'voxels'); $('sSmooth').setAttribute('aria-pressed', sh === 'smooth'); $('sVoxels').setAttribute('aria-pressed', sh === 'voxels'); applyShape(); };
-  $('sSmooth').addEventListener('click', () => setShape('smooth')); $('sVoxels').addEventListener('click', () => setShape('voxels'));
+  $('mColor').addEventListener('click', () => { S.matte = false; $('mColor').classList.add('on'); $('mMatte').classList.remove('on'); updateAll(1); if (S.mesh && S.meshK === S.k) { viewer.setSmooth(S.mesh, S.meshRgb); viewer.setSplats(S.splats, false); } applyShape(); });
+  $('mMatte').addEventListener('click', () => { S.matte = true; $('mMatte').classList.add('on'); $('mColor').classList.remove('on'); updateAll(); if (S.mesh && S.meshK === S.k) { viewer.setSmooth(S.mesh, null); viewer.setSplats(S.splats, true); } applyShape(); });
+  const setShape = (sh) => { S.shape = sh; for (const [id, k] of [['sSplats', 'splats'], ['sSmooth', 'smooth'], ['sVoxels', 'voxels']]) { $(id).classList.toggle('on', sh === k); $(id).setAttribute('aria-pressed', sh === k); } applyShape(); };
+  $('sSplats').addEventListener('click', () => setShape('splats')); $('sSmooth').addEventListener('click', () => setShape('smooth')); $('sVoxels').addEventListener('click', () => setShape('voxels'));
   $('count').addEventListener('input', (e) => { $('countNum').textContent = e.target.value; });
   $('count').addEventListener('change', (e) => { S.count = Number(e.target.value); loadDemo(); });
   $('res').addEventListener('change', (e) => { S.res = Number(e.target.value); S.rec = null; const k = S.views.length; stopPlay(); recomputeHull(k); updateAll(1); if (sliceSeen) { ensureSlice(); showSlice(S.views.length); } });
@@ -243,6 +247,8 @@ function init() {
   $('xPoints').addEventListener('click', () => { if (!exportable()) return; const rgb = ensureColors(); save(base() + '-points.ply', toPLYPoints(S.hull, S.surf, rgb)); });
   $('xMesh').addEventListener('click', () => { if (!exportable()) return; ensureMesh(); save(base() + '-mesh.ply', toPLYTriMesh(S.mesh, S.meshRgb)); });
   $('xObj').addEventListener('click', () => { if (!exportable()) return; ensureMesh(); save(base() + '.obj', toOBJMesh(S.mesh, S.meshRgb)); });
+  $('xSplat').addEventListener('click', () => { if (!exportable()) return; ensureMesh(); save(base() + '.splat', toSplat(S.splats), 'application/octet-stream'); });
+  $('xGs').addEventListener('click', () => { if (!exportable()) return; ensureMesh(); save(base() + '-gaussians.ply', toGaussianPLY(S.splats), 'application/octet-stream'); });
   $('xGlb').addEventListener('click', () => { if (!exportable()) return; ensureMesh(); save(base() + '.glb', toGLB(S.mesh, S.meshRgb), 'model/gltf-binary'); });
 
   const drop = $('drop'), file = $('file');

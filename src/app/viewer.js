@@ -1,5 +1,6 @@
 import * as THREE from '../../vendor/three.module.min.js';
 import { OrbitControls } from '../../vendor/OrbitControls.js';
+import { SplatLayer } from './splatview.js';
 
 const PAPER = 0xecebe5;
 
@@ -25,6 +26,7 @@ export class Viewer {
     this.camMarks = new THREE.LineSegments(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xff5a1f }));
     this.scene.add(this.camMarks);
     this.smooth = null; this.mesh = null; this.cap = 0; this.dummy = new THREE.Object3D();
+    this.splats = new SplatLayer(this.scene, this.camera, this.renderer);
     this.resize();
     new ResizeObserver(() => this.resize()).observe(canvas.parentElement);
     this.loop = this.loop.bind(this); requestAnimationFrame(this.loop);
@@ -92,12 +94,15 @@ export class Viewer {
     this.smooth.frustumCulled = false;
     this.scene.add(this.smooth);
   }
-  // which = 'smooth' | 'voxels'
+  // which = 'splats' | 'smooth' | 'voxels'
   show(which) {
-    const smooth = which === 'smooth' && !!this.smooth;
+    const splats = which === 'splats' && this.splats.mesh;
+    const smooth = !splats && which !== 'voxels' && !!this.smooth;
+    this.splats.setVisible(!!splats);
     if (this.smooth) this.smooth.visible = smooth;
-    if (this.mesh) this.mesh.visible = !smooth;
+    if (this.mesh) this.mesh.visible = !smooth && !splats;
   }
+  setSplats(s, matte) { if (!s) this.splats.dispose(); else this.splats.set(s, matte ? new Uint8Array(s.n * 3).fill(158) : null); }
   setCameraMarks(cams, used) {
     const p = [];
     for (let i = 0; i < cams.length; i++) {

@@ -12,7 +12,7 @@ p.on('pageerror', (e) => errors.push(e.message));
 p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 let n = 0; const ok = (name) => console.log(`ok ${++n} - ${name}`);
 const st = () => p.evaluate(() => window.__plinth.state);
-const until = (fn, ms = 60000) => p.waitForFunction(fn, null, { timeout: ms });
+const until = (fn, ms = 150000) => p.waitForFunction(fn, null, { timeout: ms });
 
 await p.goto(base);
 await until(() => window.__plinth.state.views === 36 && window.__plinth.state.k === 36 && window.__plinth.state.meshFresh);
