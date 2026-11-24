@@ -144,6 +144,13 @@ function settle() {
   }
 }
 
+let splatTimer = 0;
+function ensureSplats() {
+  if (S.splats && S.splatsK === S.k) return;
+  ensureMesh();
+  S.splats = buildSplats(S.mesh, S.cams.slice(0, S.k), S.views.slice(0, S.k).map((v) => v.img), { count: SPLATS, slack: S.hull.size * 1.75 });
+  S.splatsK = S.k; viewer.setSplats(S.splats, S.matte); applyShape();
+}
 function buildSmooth() {
   const h = S.hull, my = S.token;
   const m = buildMesh(h, S.tol);
@@ -151,8 +158,8 @@ function buildSmooth() {
   if (my !== S.token) return;
   S.mesh = m; S.meshK = S.k; S.meshRgb = rgb;
   viewer.setSmooth(m, S.matte ? null : rgb);
-  S.splats = buildSplats(m, S.cams.slice(0, S.k), S.views.slice(0, S.k).map((v) => v.img), { count: SPLATS, slack: h.size * 1.75 });
-  viewer.setSplats(S.splats, S.matte);
+  S.splats = null; S.splatsK = -1; viewer.setSplats(null);
+  clearTimeout(splatTimer); splatTimer = setTimeout(() => { if (my === S.token) ensureSplats(); }, 900);
   applyShape();
   $('sTris').textContent = `${fmt(m.indices.length / 3)} tris, ${isWatertight(m) ? 'closed' : 'open edges'}`;
   if (S.mode === 'demo') {
@@ -236,8 +243,8 @@ function init() {
   }
   $('play').addEventListener('click', play);
   $('views').addEventListener('input', (e) => { stopPlay(); viewer.controls.autoRotate = false; setK(Number(e.target.value), true); });
-  $('mColor').addEventListener('click', () => { S.matte = false; $('mColor').classList.add('on'); $('mMatte').classList.remove('on'); updateAll(1); if (S.mesh && S.meshK === S.k) { viewer.setSmooth(S.mesh, S.meshRgb); viewer.setSplats(S.splats, false); } applyShape(); });
-  $('mMatte').addEventListener('click', () => { S.matte = true; $('mMatte').classList.add('on'); $('mColor').classList.remove('on'); updateAll(); if (S.mesh && S.meshK === S.k) { viewer.setSmooth(S.mesh, null); viewer.setSplats(S.splats, true); } applyShape(); });
+  $('mColor').addEventListener('click', () => { S.matte = false; $('mColor').classList.add('on'); $('mMatte').classList.remove('on'); updateAll(1); if (S.mesh && S.meshK === S.k) { viewer.setSmooth(S.mesh, S.meshRgb); if (S.splats) viewer.setSplats(S.splats, false); } applyShape(); });
+  $('mMatte').addEventListener('click', () => { S.matte = true; $('mMatte').classList.add('on'); $('mColor').classList.remove('on'); updateAll(); if (S.mesh && S.meshK === S.k) { viewer.setSmooth(S.mesh, null); if (S.splats) viewer.setSplats(S.splats, true); } applyShape(); });
   const setShape = (sh) => { S.shape = sh; for (const [id, k] of [['sSplats', 'splats'], ['sSmooth', 'smooth'], ['sVoxels', 'voxels']]) { $(id).classList.toggle('on', sh === k); $(id).setAttribute('aria-pressed', sh === k); } applyShape(); };
   $('sSplats').addEventListener('click', () => setShape('splats')); $('sSmooth').addEventListener('click', () => setShape('smooth')); $('sVoxels').addEventListener('click', () => setShape('voxels'));
   $('count').addEventListener('input', (e) => { $('countNum').textContent = e.target.value; });
@@ -247,8 +254,8 @@ function init() {
   $('xPoints').addEventListener('click', () => { if (!exportable()) return; const rgb = ensureColors(); save(base() + '-points.ply', toPLYPoints(S.hull, S.surf, rgb)); });
   $('xMesh').addEventListener('click', () => { if (!exportable()) return; ensureMesh(); save(base() + '-mesh.ply', toPLYTriMesh(S.mesh, S.meshRgb)); });
   $('xObj').addEventListener('click', () => { if (!exportable()) return; ensureMesh(); save(base() + '.obj', toOBJMesh(S.mesh, S.meshRgb)); });
-  $('xSplat').addEventListener('click', () => { if (!exportable()) return; ensureMesh(); save(base() + '.splat', toSplat(S.splats), 'application/octet-stream'); });
-  $('xGs').addEventListener('click', () => { if (!exportable()) return; ensureMesh(); save(base() + '-gaussians.ply', toGaussianPLY(S.splats), 'application/octet-stream'); });
+  $('xSplat').addEventListener('click', () => { if (!exportable()) return; ensureSplats(); save(base() + '.splat', toSplat(S.splats), 'application/octet-stream'); });
+  $('xGs').addEventListener('click', () => { if (!exportable()) return; ensureSplats(); save(base() + '-gaussians.ply', toGaussianPLY(S.splats), 'application/octet-stream'); });
   $('xGlb').addEventListener('click', () => { if (!exportable()) return; ensureMesh(); save(base() + '.glb', toGLB(S.mesh, S.meshRgb), 'model/gltf-binary'); });
 
   const drop = $('drop'), file = $('file');

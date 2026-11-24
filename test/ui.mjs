@@ -15,6 +15,8 @@ const st = () => p.evaluate(() => window.__plinth.state);
 const until = (fn, ms = 150000) => p.waitForFunction(fn, null, { timeout: ms });
 
 await p.goto(base);
+// Software GL rasterises 60k splats slowly; the checks below do not need that view.
+await p.click('#sSmooth');
 await until(() => window.__plinth.state.views === 36 && window.__plinth.state.k === 36 && window.__plinth.state.meshFresh);
 ok('demo loads, finishes the carve animation and builds the smooth mesh');
 assert.ok((await st()).tris > 10000);
